@@ -32,8 +32,10 @@
 %% http://www.erlang.org/doc/reference_manual/macros.html
 -define(PHILOSOPHERS,5).
 -define(TICK_COUNT,1000).
+-define(VERBOSE_LEVEL,2). %% higher for more verbose
 
 start() ->
+    random:seed( now() ),
     %% spin the conductor
     register( conductor_atom, spawn( conductor, conductor_function, [] ) ),
     %% spin the philosophers, they link to the conductor and wait to be ticked
@@ -45,9 +47,14 @@ spawn_philosopher( ?PHILOSOPHERS ) ->
     ok;
 spawn_philosopher( Index ) ->
     PhilosopherName = list_to_atom( lists:flatten( io_lib:format( "philo~b", [ Index ] ) ) ),
-    io:format( "Starting ~p~n", [ PhilosopherName ] ),
+    verbose( 1, "Starting ~p~n", [ PhilosopherName ] ),
     register( PhilosopherName, spawn( conductor, philosopher, [ Index ] ) ),
     spawn_philosopher( Index + 1 ).
+
+verbose( Level, FormatString, Parameters ) when Level =< ?VERBOSE_LEVEL ->
+    io:format( FormatString, Parameters );
+verbose( _, _, _ ) ->
+    ok.
 
 %%
 %% conductor
@@ -62,14 +69,15 @@ conductor_function() ->
     end.
 
 conductor_tick_loop( _, ?TICK_COUNT ) ->
-    io:format( "end~n", [] ),
+    verbose( 1, "end~n", [] ),
     exit( shutdown );
 conductor_tick_loop( BusyForks, TickCount ) ->
-    %% verbose and verify the state, abort if an impossible state is detected
-    verify_philosopher( 0 ),
     %% pick which philosopher we will tick
     RandomPhilo = list_to_atom( lists:flatten( io_lib:format( "philo~b", [ random:uniform( ?PHILOSOPHERS ) - 1 ] ) ) ),
-    io:format( "tick ~p: ~p~n", [ TickCount, RandomPhilo ] ),
+    verbose( 2, "= tick ~p: ~p~n", [ TickCount, RandomPhilo ] ),
+    %% verbose and verify the state, abort if an impossible state is detected
+    verify_philosopher( 0 ),
+    %% send the tick
     RandomPhilo ! tick,
     conductor_receive_loop( BusyForks, TickCount ).
 
@@ -79,21 +87,21 @@ conductor_tick_loop( BusyForks, TickCount ) ->
 conductor_receive_loop( BusyForks, TickCount ) ->
     receive
         { grab_left_fork, Pid, Index } ->
-            io:format( "conductor: ~p wants left fork~n", [ Index ] ),
+            verbose( 3, "conductor: ~p wants left fork~n", [ Index ] ),
             NewBusyForks = conductor_check_fork( left, Pid, Index, BusyForks ),
             conductor_receive_loop( NewBusyForks, TickCount );
         { grab_right_fork, Pid, Index } ->
-            io:format( "conductor: ~p wants right fork~n", [ Index ] ),
+            verbose( 3, "conductor: ~p wants right fork~n", [ Index ] ),
             NewBusyForks = conductor_check_fork( right, Pid, Index, BusyForks ),
             conductor_receive_loop( NewBusyForks, TickCount );
         { done_eating, _, Index } ->
-            io:format( "conductor: ~p is done eating~n", [ Index ] ),
+            verbose( 3, "conductor: ~p is done eating~n", [ Index ] ),
             conductor_receive_loop( BusyForks - 2, TickCount );
         die ->
             exit( shutdown )
     after
         0 ->
-            io:format( "no messages, tick again~n", [] ),
+            verbose( 3, "no messages, tick again~n", [] ),
             conductor_tick_loop( BusyForks, TickCount + 1 )
     end.
 
@@ -105,7 +113,7 @@ conductor_check_fork( left, Pid, Index, BusyForks ) ->
     %% left neighbor
     NIndex = ( Index + ?PHILOSOPHERS - 1 ) rem ?PHILOSOPHERS,
     NAtom = list_to_atom( lists:flatten( io_lib:format( "philo~b", [ NIndex ] ) ) ),
-    io:format( "ask ~p about forks~n", [ NAtom ] ),
+    verbose( 3, "ask ~p about forks~n", [ NAtom ] ),
     NPid = whereis( NAtom ),
     NPid ! { get_fork_state, self() },
     receive
@@ -123,7 +131,7 @@ conductor_check_fork( right, Pid, Index, BusyForks ) ->
     %% right neighbor
     NIndex = ( Index + 1 ) rem ?PHILOSOPHERS,
     NAtom = list_to_atom( lists:flatten( io_lib:format( "philo~b", [ NIndex ] ) ) ),
-    io:format( "ask ~p about forks~n", [ NAtom ] ),
+    verbose( 3, "ask ~p about forks~n", [ NAtom ] ),
     NPid = whereis( NAtom ),
     NPid ! { get_fork_state, self() },
     receive
@@ -144,11 +152,11 @@ conductor_check_fork( right, Pid, Index, BusyForks ) ->
 
 philosopher( Index ) ->
     link( whereis( conductor_atom ) ),
-    io:format( "~p starts dining~n", [ Index ] ),
+    verbose( 3, "~p starts dining~n", [ Index ] ),
     philosopher_thinking( Index ).
 
 philosopher_thinking( Index ) ->
-    io:format( "~p is thinking~n", [ Index ] ),
+    verbose( 3, "~p is thinking~n", [ Index ] ),
     philosopher_wait_tick( Index, no_fork ),
     philosopher_hungry( Index ).
 
@@ -162,12 +170,10 @@ philosopher_wait_tick( Index, ForkState ) ->
     end.
 
 philosopher_fork_reply( _, Pid, ForkState ) ->
-%%philosopher_fork_reply( Index, Pid, ForkState ) ->
-%%    io:format( "~p receives get_fork_state from ~p, state is ~p~n", [ Index, Pid, ForkState ] ),
     Pid ! { ForkState, self() }.
 
 philosopher_hungry( Index ) ->
-    io:format( "~p is hungry~n", [ Index ] ),
+    verbose( 3, "~p is hungry~n", [ Index ] ),
     conductor_atom ! { grab_left_fork, self(), Index },
     philosopher_hungry_reply_loop( Index ).
 
@@ -185,7 +191,7 @@ philosopher_hungry_reply_loop( Index ) ->
 
 %% *has* left fork, won't let go of it, wants right fork now
 philosopher_hungry_left_fork( Index ) ->
-    io:format( "~p is hungry and has a left fork~n", [ Index ] ),
+    verbose( 3, "~p is hungry and has a left fork~n", [ Index ] ),
     conductor_atom ! { grab_right_fork, self(), Index },
     philosopher_hungry_left_fork_reply_loop( Index ).
 
@@ -203,7 +209,7 @@ philosopher_hungry_left_fork_reply_loop( Index ) ->
     end.
 
 philosopher_eating( Index ) ->
-    io:format( "~p is eating~n", [ Index ] ),
+    verbose( 3, "~p is eating~n", [ Index ] ),
     philosopher_wait_tick( Index, both_forks ),
     conductor_atom ! { done_eating, self(), Index },
     philosopher_thinking( Index ).
@@ -222,17 +228,17 @@ verify_philosopher( Index ) ->
     Pid ! { get_fork_state, self() },
     receive
         { no_fork, SenderPid } when SenderPid == Pid ->
-            io:format( "~p: no fork~n", [ Atom ] ),
+            verbose( 2, "~p: no fork~n", [ Atom ] ),
             %% nothing, go directly to the next philosopher
             verify_philosopher( Index + 1 );
         { left_fork, SenderPid } when SenderPid == Pid ->            
-            io:format( "~p: left fork~n", [ Atom ] ),
+            verbose( 2, "~p: left fork~n", [ Atom ] ),
             %% verify that the philosopher on the left does not think he has both forks
             assert_philosopher_state( ( Index + ?PHILOSOPHERS - 1 ) rem ?PHILOSOPHERS, { no_fork, left_fork } ),
             %% verify the next philosopher
             verify_philosopher( Index + 1 );
         { both_forks, SenderPid } when SenderPid == Pid ->
-            io:format( "~p: both forks~n", [ Atom ] ),
+            verbose( 2, "~p: both forks~n", [ Atom ] ),
             %% verify that the philosopher on the left does not think he has both forks
             assert_philosopher_state( ( Index + ?PHILOSOPHERS - 1 ) rem ?PHILOSOPHERS, { no_fork, left_fork } ),
             %% verify that the philosopher on the right does not think he has left fork
