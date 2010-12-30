@@ -252,7 +252,6 @@ assert_philosopher_state( Index, AllowedStates ) ->
     Pid = whereis( NAtom ),
     Pid ! { get_fork_state, self() },
     receive
-        %% see recvtest, couldn't find a way to avoid the 3 handlers
         { no_fork, SenderPid } when SenderPid == Pid ->
             test_philosopher_state( no_fork, AllowedStates );
         { left_fork, SenderPid } when SenderPid == Pid ->
